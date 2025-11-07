@@ -1,6 +1,7 @@
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.geom.AffineTransform;
 import java.util.*;
 import java.util.List;
 
@@ -115,6 +116,7 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
         walls.add(new Wall(600, 400, 120, 40, Wall.Type.SLOW));
         walls.add(new Wall(450, 650, 100, 40, Wall.Type.DESTRUCTIBLE, 35));
         walls.add(new Wall(150, 150, 40, 300, Wall.Type.THROUGH));
+        walls.add(new Wall(800, 100, 150, 50, Wall.Type.FREEZE));
 
         // Game loops (timers)
         new javax.swing.Timer(16, e -> gameLoop()).start();                 // main loop ~60fps
@@ -203,7 +205,10 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
                             removed = true; // bullet stops
                             break;
                         case SLOW:
-                            b.vx *= 0.5; b.vy *= 0.5; // slow down
+                            if (Math.abs(b.vx) > 0.25 || Math.abs(b.vy) > 0.25) { b.vx *= 0.5; b.vy *= 0.5; } // slow down
+                            break;
+                        case FREEZE:
+                            b.vx = 0; b.vy = 0; // stop bullet
                             break;
                         case DESTRUCTIBLE:
                             w.hp--;
@@ -236,7 +241,10 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
                             collided = true;
                             break;
                         case SLOW:
-                            eb.vx *= 0.5; eb.vy *= 0.5;
+                            if (Math.abs(eb.vx) > 0.25 || Math.abs(eb.vy) > 0.25) { eb.vx *= 0.5; eb.vy *= 0.5; }
+                            break;
+                        case FREEZE:
+                            eb.vx = 0; eb.vy = 0;
                             break;
                         case DESTRUCTIBLE:
                             w.hp--;
@@ -314,9 +322,11 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
             } else if (System.currentTimeMillis() - hp.spawnTime > 15000) it.remove();
         }
 
+        if(playerHP > playerHPMax) playerHP = playerHPMax;
+
         // --- upgrades progression ---
         checkUpgrades();
-        swordAngle += 0.05;
+        swordAngle += 0.02;
 
         // --- towers ---
         for (Tower t : towers) t.update(enemies, bullets);
@@ -353,20 +363,23 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
 
     private void checkUpgrades() {
         if (score - lastUpgradeScore < 10) return;
-        if (score >= 10 && swordCount == 0) swordCount = 1;
-        if (score >= 20 && swordCount == 1) swordCount = 2;
-        if (score >= 30 && swordCount == 2) swordCount = 3;
-        if (score >= 40 && swordCount == 3) swordCount = 4;
+
+        // Sword upgrades
+        if(score % 15 >= 0) swordCount++;
+
+        // Reload time upgrades
         if (score >= 40) reloadTime = 3000;
-        if (score >= 50 && swordCount == 4) swordCount = 5;
-        if (score >= 60 && swordCount == 5) swordCount = 6;
-        if (score >= 60) bulletSize = 9;
-        if (score >= 80 && playerHP < playerHPMax) playerHP += 25;
         if (score >= 100) reloadTime = 1500;
-        if (score >= 120 && playerHP < playerHPMax) playerHP += 45;
         if (score >= 140) reloadTime = 500;
         if (score >= 160) reloadTime = 150;
+
+        // Bullet size upgrades
+        if (score >= 60) bulletSize = 9;
         if (score >= 200) bulletSize = 20;
+
+        // HP bonuses
+        if (score >= 80 && playerHP < playerHPMax) playerHP += 25;
+        if (score >= 120 && playerHP < playerHPMax) playerHP += 45;
 
         // Fire rate upgrades
         if (score >= 20 && fireDelay > 400) fireDelay = 400;
@@ -397,79 +410,88 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
-        Graphics2D g2 = (Graphics2D) g.create();
+        Graphics2D g2 = (Graphics2D) g;
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-        int w = getWidth();
-        int h = getHeight();
-        float time = System.currentTimeMillis() / 1000f;
-
-        // --- Visualizer ---
-        float bassLevel = (float) (0.5 + 0.5 * Math.sin(time * 3.5));
-        float vibration = (bassLevel - 0.5f) * 10f;
-
-        g2.setColor(new Color(10,10,10));
-        g2.fillRect(0, 0, w, h);
-
-        for (int i = 0; i < 3; i++) {
-            float hue = (float) ((Math.sin(time*0.3 + i*2)*0.5) + 0.5);
-            float brightness = 0.3f + 0.4f * bassLevel;
-            Color c = Color.getHSBColor(hue, 0.8f, brightness);
-
-            int size = (int)(400 + 200*bassLevel);
-            int x = (int)(Math.sin(time*0.2 + i)*200 + w/2 + vibration);
-            int y = (int)(Math.cos(time*0.25 + i)*150 + h/2 + vibration);
-
-            RadialGradientPaint rgp = new RadialGradientPaint(
-                    x, y, size,
-                    new float[]{0f, 1f},
-                    new Color[]{ new Color(c.getRed(),c.getGreen(),c.getBlue(),100), new Color(0,0,0,0) }
-            );
-            g2.setPaint(rgp);
-            g2.fillRect(0, 0, w, h);
-        }
-
-        g2.setColor(new Color(0,0,0,120));
-        g2.fillRect(0,0,w,h);
-
-        // --- Titelbildschirm ---
         if (titleScreen) {
             g2.setColor(Color.WHITE);
-            g2.setFont(g2.getFont().deriveFont(Font.BOLD,48f));
+            g2.setFont(g2.getFont().deriveFont(Font.BOLD, 48f));
             String txt = "SQUARE SHOOTER EXPERIMENTAL";
             int tw = g2.getFontMetrics().stringWidth(txt);
-            g2.drawString(txt, w/2 - tw/2, h/2 - 50);
-
-            g2.setFont(g2.getFont().deriveFont(Font.PLAIN,20f));
+            g2.drawString(txt, screenW / 2 - tw / 2, screenH / 2 - 50);
+            g2.setFont(g2.getFont().deriveFont(Font.PLAIN, 20f));
             String start = "Press SPACE to Start";
-            g2.drawString(start, w/2 - g2.getFontMetrics().stringWidth(start)/2, h/2 + 10);
-            g2.dispose();
+            g2.drawString(start, screenW / 2 - g2.getFontMetrics().stringWidth(start) / 2, screenH / 2 + 10);
+
+            String help = "WASD Move • Mouse Aim • LMB Fire • 1 Buy Tower • 2 Shield • F Friendly-Fire Toggle";
+            g2.setFont(g2.getFont().deriveFont(Font.PLAIN, 14f));
+            g2.drawString(help, screenW / 2 - g2.getFontMetrics().stringWidth(help) / 2, screenH / 2 + 40);
             return;
         }
 
-        // --- Spielfelder ---
-        for (Wall wall : walls) wall.draw(g2);
+        // --- Walls ---
+        for (SquareShooterExperimental.Wall w : walls) w.draw(g2);
 
-        drawNeonRect(g2, playerX - playerSize/2, playerY - playerSize/2, playerSize, playerSize, new Color(0,255,255), 3);
+        // --- player ---
+        drawNeonRect(g2, playerX - playerSize / 2, playerY - playerSize / 2, playerSize, playerSize, new Color(0, 255, 255), 3);
+        if (System.currentTimeMillis() - lastDamageTime < 600) {
+            g2.setColor(Color.RED);
+            g2.drawString("-" + lastDamage, playerX - 10, playerY - 40);
+        }
 
-        // Schwerter
+        // --- swords
         if (swordCount > 0) drawSwords(g2);
 
-        // Bullets
+        // --- bullets ---
         g2.setColor(Color.WHITE);
-        for (Bullet b : bullets) g2.fillOval((int)b.x - bulletSize/2, (int)b.y - bulletSize/2, bulletSize, bulletSize);
+        for (SquareShooterExperimental.Bullet b : bullets)
+            g2.fillOval((int) b.x - bulletSize / 2, (int) b.y - bulletSize / 2, bulletSize, bulletSize);
 
-        // Enemy Bullets
-        g2.setColor(new Color(255,0,255));
-        for (EnemyBullet eb : enemyBullets) g2.fillOval((int)eb.x - 4, (int)eb.y - 4, 8, 8);
+        // --- enemy bullets ---
+        g2.setColor(new Color(255, 0, 255));
+        for (SquareShooterExperimental.EnemyBullet eb : enemyBullets) g2.fillOval((int) eb.x - 4, (int) eb.y - 4, 8, 8);
 
-        // Gegner
-        for (Enemy en : enemies) en.draw(g2);
+        // --- enemies ---
+        for (SquareShooterExperimental.Enemy en : enemies) en.draw(g2);
 
-        // HUD
+        // --- health packs ---
+        for (SquareShooterExperimental.HealthPack hp : healthPacks) hp.draw(g2);
+
+        // --- towers ---
+        for (SquareShooterExperimental.Tower t : towers) t.draw(g2);
+
+        // --- shield ---
+        if (shieldActive && shield != null) shield.draw(g2);
+
+        // --- placing preview ---
+        if (placingTower) {
+            g2.setColor(new Color(255, 255, 0, 120));
+            g2.fillRect(mouseX - 15, mouseY - 15, 30, 30);
+            g2.setColor(Color.WHITE);
+            g2.drawString("Click to place tower (" + towersToPlace + " left). Press ESC to cancel.", 10, screenH - 20);
+        }
+
         drawHUD(g2);
 
-        g2.dispose();
+        // Wave cleared text
+        if (waveCleared) {
+            g2.setColor(new Color(255, 255, 255, 220));
+            g2.setFont(g2.getFont().deriveFont(Font.BOLD, 28f));
+            int tw = g2.getFontMetrics().stringWidth(notifyMessage);
+            g2.drawString(notifyMessage, screenW / 2 - tw / 2, screenH / 2);
+        }
+
+        if (gameOver) {
+            g2.setColor(new Color(255, 255, 255, 200));
+            g2.setFont(g2.getFont().deriveFont(Font.BOLD, 36f));
+            String txt = "GAME OVER";
+            int tw = g2.getFontMetrics().stringWidth(txt);
+            g2.drawString(txt, screenW / 2 - tw / 2, screenH / 2);
+
+            g2.setFont(g2.getFont().deriveFont(Font.PLAIN, 24f));
+            String restart = "Press SPACE to Restart";
+            g2.drawString(restart, screenW / 2 - g2.getFontMetrics().stringWidth(restart) / 2, screenH / 2 + 40);
+        }
     }
 
 
@@ -479,13 +501,30 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
             int radius = 50;
             int sx = playerX + (int) (Math.cos(angle) * radius);
             int sy = playerY + (int) (Math.sin(angle) * radius);
+
+            // Save the original transform
+            AffineTransform old = g2.getTransform();
+
+            // Translate to sword position and rotate
+            g2.translate(sx, sy);
+            g2.rotate(angle + Math.PI/2);
+
+            // Draw sword body
             g2.setColor(new Color(0, 255, 255, 150));
-            g2.fillRect(sx - 5, sy - 15, 10, 30);
+            g2.fillRect(-5, -15, 10, 30);
+            g2.fillRect(-2, 15, 4, 10);
+
+            // Draw sword tip
             Polygon tri = new Polygon();
-            tri.addPoint(sx, sy - 20);
-            tri.addPoint(sx - 7, sy - 10);
-            tri.addPoint(sx + 7, sy - 10);
+            tri.addPoint(0, -20);
+            tri.addPoint(-5, -15);
+            tri.addPoint(5, -15);
             g2.fillPolygon(tri);
+
+            // Restore original transform
+            g2.setTransform(old);
+
+            // Check collision
             for (Enemy en : enemies) if (en.getBounds().contains(sx, sy)) en.hp -= 1;
         }
     }
@@ -640,7 +679,7 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
     private void restartGame() {
         playerHP = playerHPMax; totalDamageTaken = 0; ammo = 35; score = 0; totalSpawned = 0;
         bullets.clear(); enemies.clear(); enemyBullets.clear(); towers.clear(); healthPacks.clear();
-        swordCount = 0; swordAngle = 0; reloadTime = 500; bulletSize = 6;
+        swordCount = 1; swordAngle = 0.001; reloadTime = 500; bulletSize = 6;
         gameOver = false; titleScreen = false;
         waveCleared = false; notifyMessage = "";
         maxTotalEnemies = 50;
@@ -745,18 +784,19 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
         int x, y, w, h, hp = 0;
         Type type;
         boolean destructible = false;
-        enum Type { STOP, SLOW, THROUGH, DESTRUCTIBLE }
+        enum Type { STOP, SLOW, THROUGH, FREEZE, DESTRUCTIBLE }
         Wall(int x, int y, int w, int h, Type type) { this.x = x; this.y = y; this.w = w; this.h = h; this.type = type; destructible = type == Type.DESTRUCTIBLE; if (destructible) hp = 3; }
         Wall(int x, int y, int w, int h, Type type, int hp) { this(x, y, w, h, type); this.hp = hp; }
         Rectangle getBounds() { return new Rectangle(x, y, w, h); }
         boolean blocksPlayer() { return type == Type.STOP || type == Type.DESTRUCTIBLE; }
-        boolean blocksBullets() { return type == Type.STOP || type == Type.SLOW || type == Type.DESTRUCTIBLE; }
+        boolean blocksBullets() { return type == Type.STOP || type == Type.SLOW || type == Type.DESTRUCTIBLE || type == Type.FREEZE; }
         void draw(Graphics2D g2) {
             switch (type) {
                 case STOP: g2.setColor(Color.GRAY); g2.fillRect(x, y, w, h); break;
                 case SLOW: g2.setColor(Color.BLUE); g2.fillRect(x, y, w, h); break;
                 case THROUGH: g2.setColor(Color.DARK_GRAY); g2.fillRect(x, y, w, h); break;
                 case DESTRUCTIBLE: g2.setColor(new Color(200, 100, 0)); g2.fillRect(x, y, w, h); break;
+                case FREEZE: g2.setColor(Color.YELLOW); g2.fillRect(x, y, w, h); break;
             }
             if (destructible) {
                 g2.setColor(Color.BLACK);
@@ -847,5 +887,5 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
         }
     }
 
-    public static void main(String[] args) { SwingUtilities.invokeLater(SquareShooterUpgraded::new); }
+    public static void main(String[] args) { SwingUtilities.invokeLater(SquareShooterExperimental::new); }
 }
