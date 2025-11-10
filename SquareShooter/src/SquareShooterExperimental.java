@@ -90,6 +90,7 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
     private int score = 0;
     private boolean gameOver = false;
     private boolean titleScreen = true;
+    private boolean paused = false; // pause state
     private final int maxActiveEnemies = 30; // active concurrent enemies
     private int maxTotalEnemies = 50; // per wave
     private boolean waveCleared = false;
@@ -121,13 +122,14 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
         // Game loops (timers)
         new javax.swing.Timer(16, e -> gameLoop()).start();                 // main loop ~60fps
         new javax.swing.Timer(1800, e -> spawnEnemy()).start();            // spawn attempt
-        new javax.swing.Timer(120, e -> { if (!gameOver && mouseDown && !placingTower) fireBullet(); }).start();
+        // respect pause in firing timer
+        new javax.swing.Timer(120, e -> { if (!gameOver && !paused && mouseDown && !placingTower) fireBullet(); }).start();
         new javax.swing.Timer(30000, e -> spawnHealthPacks()).start();     // healthpack spawner
     }
 
     // --- spawn enemy with screen size awareness ---
     private void spawnEnemy() {
-        if (gameOver || titleScreen) return;
+        if (gameOver || titleScreen || paused) return;
         if (totalSpawned >= maxTotalEnemies) return;
         if (enemies.size() >= maxActiveEnemies) return;
 
@@ -140,7 +142,7 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
     }
 
     private void spawnHealthPacks() {
-        if (gameOver || titleScreen) return;
+        if (gameOver || titleScreen || paused) return;
         int count = 1 + rnd.nextInt(3);
         for (int i = 0; i < count; i++) {
             int x = rnd.nextInt(Math.max(1, screenW - 100)) + 50;
@@ -158,6 +160,8 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
 
         if (titleScreen) { repaint(); return; }
         if (gameOver) { repaint(); return; }
+
+        if (paused) { repaint(); return; } // freeze updates while paused
 
         // Freeze gameplay updates while placing tower (renders still run)
         if (placingTower) { repaint(); return; }
@@ -344,7 +348,7 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
         // --- wave cleared handling ---
         if (totalSpawned >= maxTotalEnemies && enemies.isEmpty() && !waveCleared) {
             waveCleared = true;
-            notifyMessage = "WAVE CLEARED! Bonus: +20 score, Press SPACE to continue";
+            notifyMessage = "WAVE CLEARED! Bonus: +20 score | Press SPACE to continue";
             score += 20;
             // small heal bonus
             playerHP = Math.min(playerHPMax, playerHP + 20);
@@ -365,7 +369,7 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
         if (score - lastUpgradeScore < 10) return;
 
         // Sword upgrades
-        if(score % 15 >= 0) swordCount++;
+        if(score % 15 >= 0 && swordCount < 24) swordCount++;
 
         // Reload time upgrades
         if (score >= 40) reloadTime = 3000;
@@ -392,7 +396,7 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
     }
 
     private void fireBullet() {
-        if (gameOver || reloading || placingTower) return;
+        if (gameOver || reloading || placingTower || paused) return;
         long now = System.currentTimeMillis();
         if (now - lastShot < fireDelay) return;
 
@@ -492,41 +496,98 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
             String restart = "Press SPACE to Restart";
             g2.drawString(restart, screenW / 2 - g2.getFontMetrics().stringWidth(restart) / 2, screenH / 2 + 40);
         }
+
+        // --- PAUSE MENU ---
+        if (paused) {
+            this.addMouseMotionListener(this);
+            this.addMouseListener(this);
+            // dark overlay
+            g2.setColor(new Color(0, 0, 0, 160));
+            g2.fillRect(0, 0, screenW, screenH);
+
+            // menu box
+            int boxW = 360, boxH = 260;
+            int bx = screenW / 2 - boxW / 2;
+            int by = screenH / 2 - boxH / 2;
+            g2.setColor(new Color(30, 30, 30, 220));
+            g2.fillRoundRect(bx, by, boxW, boxH, 14, 14);
+            g2.setColor(Color.WHITE);
+            g2.setFont(g2.getFont().deriveFont(Font.BOLD, 28f));
+            String title = "PAUSED";
+            int tw = g2.getFontMetrics().stringWidth(title);
+            g2.drawString(title, screenW / 2 - tw / 2, by + 45);
+
+            // buttons
+            int bw = 220, bh = 40;
+            int bxBtn = screenW / 2 - bw / 2;
+            int startY = by + 80;
+            String[] labels = {"Continue", "Restart", "Quit"};
+            for (int i = 0; i < labels.length; i++) {
+                int byBtn = startY + i * 60;
+                // hover effect
+                if (rectContainsPoint(bxBtn, byBtn, bw, bh, mouseX, mouseY)) g2.setColor(new Color(200, 200, 200));
+                else g2.setColor(new Color(120, 120, 120));
+                g2.fillRoundRect(bxBtn, byBtn, bw, bh, 10, 10);
+                g2.setColor(Color.BLACK);
+                g2.setFont(g2.getFont().deriveFont(Font.PLAIN, 20f));
+                int lw = g2.getFontMetrics().stringWidth(labels[i]);
+                g2.drawString(labels[i], bxBtn + bw / 2 - lw / 2, byBtn + bh / 2 + 7);
+            }
+        } else {
+            this.removeMouseMotionListener(this);
+            this.removeMouseListener(this);
+        }
     }
 
-
     private void drawSwords(Graphics2D g2) {
-        for (int i = 0; i < swordCount; i++) {
-            double angle = swordAngle * (i % 2 == 0 ? 1 : -1) + (i * Math.PI / swordCount);
-            int radius = 50;
-            int sx = playerX + (int) (Math.cos(angle) * radius);
-            int sy = playerY + (int) (Math.sin(angle) * radius);
+        int innerSwords = Math.min(8, swordCount);
+        int outerSwords = Math.min(16, swordCount - innerSwords);
 
-            // Save the original transform
-            AffineTransform old = g2.getTransform();
-
-            // Translate to sword position and rotate
-            g2.translate(sx, sy);
-            g2.rotate(angle + Math.PI/2);
-
-            // Draw sword body
-            g2.setColor(new Color(0, 255, 255, 150));
-            g2.fillRect(-5, -15, 10, 30);
-            g2.fillRect(-2, 15, 4, 10);
-
-            // Draw sword tip
-            Polygon tri = new Polygon();
-            tri.addPoint(0, -20);
-            tri.addPoint(-5, -15);
-            tri.addPoint(5, -15);
-            g2.fillPolygon(tri);
-
-            // Restore original transform
-            g2.setTransform(old);
-
-            // Check collision
-            for (Enemy en : enemies) if (en.getBounds().contains(sx, sy)) en.hp -= 1;
+        // inner ring (first 8 swords)
+        double angleSpacing = (2 * Math.PI) / innerSwords;
+        for (int i = 0; i < innerSwords; i++) {
+            double angle = swordAngle + (i * angleSpacing);
+            drawSword(g2, angle, 50);
         }
+
+        // outer ring (remaining swords, max 16)
+        if (outerSwords > 0) {
+            angleSpacing = (2 * Math.PI) / outerSwords;
+            for (int i = 0; i < outerSwords; i++) {
+                double angle = -swordAngle + (i * angleSpacing); // negative angle = opposite rotation
+                drawSword(g2, angle, 100);
+            }
+        }
+    }
+
+    private void drawSword(Graphics2D g2, double angle, int radius) {
+        int sx = playerX + (int) (Math.cos(angle) * radius);
+        int sy = playerY + (int) (Math.sin(angle) * radius);
+
+        // Save the original transform
+        AffineTransform old = g2.getTransform();
+
+        // Translate to sword position and rotate
+        g2.translate(sx, sy);
+        g2.rotate(angle + Math.PI/2);
+
+        // Draw sword body
+        g2.setColor(new Color(0, 255, 255, 150));
+        g2.fillRect(-5, -15, 10, 30); // blade
+        g2.fillRect(-2, 15, 4, 10);   // handle
+
+        // Draw sword tip
+        Polygon tri = new Polygon();
+        tri.addPoint(0, -20);
+        tri.addPoint(-5, -15);
+        tri.addPoint(5, -15);
+        g2.fillPolygon(tri);
+
+        // Restore original transform
+        g2.setTransform(old);
+
+        // Check collision
+        for (Enemy en : enemies) if (en.getBounds().contains(sx, sy)) en.hp -= 1;
     }
 
     private void drawHUD(Graphics2D g2) {
@@ -648,6 +709,9 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
                     placingTower = false;
                     score += towersToPlace * 100; // refund
                     towersToPlace = 0;
+                } else {
+                    // toggle pause
+                    paused = !paused;
                 }
                 break;
         }
@@ -660,6 +724,22 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
     @Override
     public void mousePressed(MouseEvent e) {
         mouseDown = true;
+        // If paused, handle pause menu button clicks
+        if (paused) {
+            int boxW = 360, boxH = 260;
+            int bx = screenW / 2 - boxW / 2;
+            int by = screenH / 2 - boxH / 2;
+            int bw = 220, bh = 40;
+            int bxBtn = screenW / 2 - bw / 2;
+            int startY = by + 80;
+            int px = e.getX();
+            int py = e.getY();
+            if (rectContainsPoint(bxBtn, startY, bw, bh, px, py)) { paused = false; return; } // continue
+            if (rectContainsPoint(bxBtn, startY + 60, bw, bh, px, py)) { paused = false; restartGame(); return; } // restart
+            if (rectContainsPoint(bxBtn, startY + 120, bw, bh, px, py)) { System.exit(0); return; } // quit
+            return;
+        }
+
         if (placingTower && towersToPlace > 0) {
             // clamp placement inside screen
             int px = Math.max(20, Math.min(screenW - 20, mouseX));
@@ -679,7 +759,7 @@ public class SquareShooterExperimental extends JPanel implements KeyListener, Mo
     private void restartGame() {
         playerHP = playerHPMax; totalDamageTaken = 0; ammo = 35; score = 0; totalSpawned = 0;
         bullets.clear(); enemies.clear(); enemyBullets.clear(); towers.clear(); healthPacks.clear();
-        swordCount = 1; swordAngle = 0.001; reloadTime = 500; bulletSize = 6;
+        swordCount = 0; swordAngle = 0.001; reloadTime = 500; bulletSize = 6; lastUpgradeScore = 0;
         gameOver = false; titleScreen = false;
         waveCleared = false; notifyMessage = "";
         maxTotalEnemies = 50;
